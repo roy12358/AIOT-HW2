@@ -14,6 +14,26 @@ from streamlit_folium import st_folium
 DB_NAME    = "data.db"
 TABLE_NAME = "TemperatureForecasts"
 
+# 六大地區 → 縣市對應
+REGION_COUNTIES = {
+    "北部":  ["臺北市", "新北市", "基隆市", "桃園市", "新竹市", "新竹縣"],
+    "中部":  ["苗栗縣", "臺中市", "彰化縣", "南投縣", "雲林縣"],
+    "南部":  ["嘉義市", "嘉義縣", "臺南市", "高雄市", "屏東縣", "澎湖縣"],
+    "東北部": ["宜蘭縣"],
+    "東部":  ["花蓮縣", "臺東縣"],
+    "東南部": ["金門縣", "連江縣"],
+}
+
+# 六大地區地圖中心座標
+REGION_INFO = {
+    "北部":  {"lat": 25.00, "lon": 121.30},
+    "中部":  {"lat": 24.10, "lon": 120.70},
+    "南部":  {"lat": 22.90, "lon": 120.30},
+    "東北部": {"lat": 24.70, "lon": 121.80},
+    "東部":  {"lat": 23.80, "lon": 121.55},
+    "東南部": {"lat": 23.50, "lon": 119.80},
+}
+
 # 22 縣市座標
 COUNTY_INFO = {
     "臺北市": {"lat": 25.04, "lon": 121.51, "short": "北市"},
@@ -40,6 +60,9 @@ COUNTY_INFO = {
     "連江縣": {"lat": 26.16, "lon": 119.95, "short": "馬祖"},
 }
 
+# 縣市 → 地區反查
+COUNTY_TO_REGION = {c: r for r, cs in REGION_COUNTIES.items() for c in cs}
+
 
 # ── DB helpers ───────────────────────────────────────────────
 @st.cache_data(ttl=300)
@@ -60,7 +83,6 @@ def get_counties() -> list[str]:
     with sqlite3.connect(DB_NAME) as c:
         rows = c.execute(
             f"SELECT DISTINCT regionName FROM {TABLE_NAME}").fetchall()
-    # 依照 COUNTY_INFO 定義的順序排列
     order = list(COUNTY_INFO.keys())
     names = [r[0] for r in rows]
     return sorted(names, key=lambda x: order.index(x) if x in order else 99)
@@ -90,7 +112,28 @@ def temp_gradient(t: float) -> str:
 
 
 # ── 地圖標記 HTML ────────────────────────────────────────────
-def marker_html(short: str, maxt: float, mint: float, is_sel: bool) -> str:
+def marker_html_region(region: str, maxt: float, mint: float,
+                       is_sel: bool, faded: bool = False) -> str:
+    grad    = temp_gradient(maxt)
+    w       = 72 if is_sel else (40 if faded else 60)
+    opacity = "0.45" if faded else "1"
+    ring    = ("box-shadow:0 0 0 4px rgba(30,64,175,0.25),0 4px 20px rgba(0,0,0,0.3);"
+               if is_sel else "box-shadow:0 2px 12px rgba(0,0,0,0.2);")
+    border  = "border:3px solid #1E40AF;" if is_sel else "border:2px solid rgba(255,255,255,0.8);"
+    fs1     = 14 if is_sel else (8 if faded else 11)
+    fs2     = 11 if is_sel else (7 if faded else 9)
+    return (
+        f'<div style="width:{w}px;height:{w}px;border-radius:50%;background:{grad};'
+        f'{border}{ring}opacity:{opacity};'
+        f'display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;">'
+        f'<span style="font-size:{fs1}px;font-weight:900;color:white;'
+        f'text-shadow:0 1px 3px rgba(0,0,0,.8);line-height:1.2;">{region}</span>'
+        f'<span style="font-size:{fs2}px;font-weight:700;color:rgba(255,255,255,.9);'
+        f'text-shadow:0 1px 2px rgba(0,0,0,.7);">{mint:.0f}~{maxt:.0f}°</span>'
+        f'</div>'
+    )
+
+def marker_html_county(short: str, maxt: float, mint: float, is_sel: bool) -> str:
     grad   = temp_gradient(maxt)
     w      = 56 if is_sel else 44
     ring   = ("box-shadow:0 0 0 3px rgba(30,64,175,0.3),0 3px 14px rgba(0,0,0,0.3);"
@@ -99,8 +142,7 @@ def marker_html(short: str, maxt: float, mint: float, is_sel: bool) -> str:
     return (
         f'<div style="width:{w}px;height:{w}px;border-radius:50%;background:{grad};'
         f'{border}{ring}'
-        f'display:flex;flex-direction:column;align-items:center;justify-content:center;'
-        f'cursor:pointer;">'
+        f'display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;">'
         f'<span style="font-size:{11 if is_sel else 9}px;font-weight:900;color:white;'
         f'text-shadow:0 1px 3px rgba(0,0,0,.7);line-height:1.2;">{short}</span>'
         f'<span style="font-size:{9 if is_sel else 8}px;font-weight:700;'
@@ -111,38 +153,98 @@ def marker_html(short: str, maxt: float, mint: float, is_sel: bool) -> str:
 
 
 # ── Folium 台灣地圖 ──────────────────────────────────────────
-def build_map(df_all: pd.DataFrame, selected: str) -> folium.Map:
+def build_map(df_all: pd.DataFrame, selected_county: str,
+              expanded_region: str | None) -> folium.Map:
     summ = county_summary(df_all).set_index("regionName")
-    m = folium.Map(location=[23.8, 120.9], zoom_start=7,
-                   tiles="CartoDB positron")
-    m.options["zoomControl"] = False
+    selected_region = COUNTY_TO_REGION.get(selected_county, "")
 
-    for county, info in COUNTY_INFO.items():
-        if county not in summ.index:
-            continue
-        maxt   = float(summ.loc[county, "avg_maxt"])
-        mint   = float(summ.loc[county, "avg_mint"])
-        is_sel = (county == selected)
-        w      = 56 if is_sel else 44
+    if expanded_region is None:
+        # ── 地區總覽 ─────────────────────────────────────────
+        m = folium.Map(location=[23.8, 120.9], zoom_start=7,
+                       tiles="CartoDB positron")
+        m.options["zoomControl"] = False
 
-        tooltip_html = (
-            f"<div style='font-family:sans-serif;min-width:120px;'>"
-            f"<b style='font-size:14px;color:#1E40AF'>{county}</b>"
-            f"<hr style='margin:4px 0'>"
-            f"🌡 最高：<b style='color:#DC2626'>{maxt:.1f}°C</b><br>"
-            f"❄️ 最低：<b style='color:#2563EB'>{mint:.1f}°C</b>"
-            f"</div>"
-        )
+        for region, info in REGION_INFO.items():
+            cs = [c for c in REGION_COUNTIES[region] if c in summ.index]
+            if not cs:
+                continue
+            avg_maxt = float(sum(summ.loc[c, "avg_maxt"] for c in cs) / len(cs))
+            avg_mint = float(sum(summ.loc[c, "avg_mint"] for c in cs) / len(cs))
+            is_sel   = (region == selected_region)
+            w        = 72 if is_sel else 60
 
-        folium.Marker(
-            location=[info["lat"], info["lon"]],
-            icon=folium.DivIcon(
-                html=marker_html(info["short"], maxt, mint, is_sel),
-                icon_size=(w, w),
-                icon_anchor=(w // 2, w // 2),
-            ),
-            tooltip=folium.Tooltip(tooltip_html, sticky=True),
-        ).add_to(m)
+            folium.Marker(
+                location=[info["lat"], info["lon"]],
+                icon=folium.DivIcon(
+                    html=marker_html_region(region, avg_maxt, avg_mint, is_sel),
+                    icon_size=(w, w), icon_anchor=(w // 2, w // 2),
+                ),
+                tooltip=folium.Tooltip(
+                    f"<b style='color:#1E40AF'>{region}</b><br>"
+                    f"🌡 {avg_maxt:.1f}° / ❄️ {avg_mint:.1f}°<br>"
+                    f"<small style='color:#64748B'>點擊展開縣市</small>",
+                    sticky=True,
+                ),
+            ).add_to(m)
+
+    else:
+        # ── 縣市展開 ─────────────────────────────────────────
+        ri   = REGION_INFO[expanded_region]
+        cs   = [c for c in REGION_COUNTIES[expanded_region] if c in COUNTY_INFO]
+        lats = [COUNTY_INFO[c]["lat"] for c in cs]
+        lons = [COUNTY_INFO[c]["lon"] for c in cs]
+        pad  = 0.35
+        m = folium.Map(location=[ri["lat"], ri["lon"]], zoom_start=9,
+                       tiles="CartoDB positron")
+        if lats:
+            m.fit_bounds([[min(lats)-pad, min(lons)-pad],
+                          [max(lats)+pad, max(lons)+pad]])
+        m.options["zoomControl"] = False
+
+        # 展開區域的縣市
+        for county in cs:
+            if county not in summ.index:
+                continue
+            info   = COUNTY_INFO[county]
+            maxt   = float(summ.loc[county, "avg_maxt"])
+            mint   = float(summ.loc[county, "avg_mint"])
+            is_sel = (county == selected_county)
+            w      = 56 if is_sel else 44
+            folium.Marker(
+                location=[info["lat"], info["lon"]],
+                icon=folium.DivIcon(
+                    html=marker_html_county(info["short"], maxt, mint, is_sel),
+                    icon_size=(w, w), icon_anchor=(w // 2, w // 2),
+                ),
+                tooltip=folium.Tooltip(
+                    f"<b style='color:#1E40AF'>{county}</b><br>"
+                    f"🌡 {maxt:.1f}° / ❄️ {mint:.1f}°",
+                    sticky=True,
+                ),
+            ).add_to(m)
+
+        # 其他地區：小圓（淡化），點擊可切換
+        for region, info in REGION_INFO.items():
+            if region == expanded_region:
+                continue
+            cs_r = [c for c in REGION_COUNTIES[region] if c in summ.index]
+            if not cs_r:
+                continue
+            avg_maxt = float(sum(summ.loc[c, "avg_maxt"] for c in cs_r) / len(cs_r))
+            avg_mint = float(sum(summ.loc[c, "avg_mint"] for c in cs_r) / len(cs_r))
+            w = 40
+            folium.Marker(
+                location=[info["lat"], info["lon"]],
+                icon=folium.DivIcon(
+                    html=marker_html_region(region, avg_maxt, avg_mint,
+                                            False, faded=True),
+                    icon_size=(w, w), icon_anchor=(w // 2, w // 2),
+                ),
+                tooltip=folium.Tooltip(
+                    f"<b>{region}</b><br><small>點擊切換地區</small>",
+                    sticky=True,
+                ),
+            ).add_to(m)
 
     return m
 
@@ -191,16 +293,15 @@ def build_line(df: pd.DataFrame, county: str) -> go.Figure:
     return fig
 
 
-# ── 長條圖（全台各縣市）────────────────────────────────────
-def build_bar(df_all: pd.DataFrame, selected: str) -> go.Figure:
+# ── 長條圖 ────────────────────────────────────────────────────
+def build_bar(df_all: pd.DataFrame, selected_county: str) -> go.Figure:
     s = county_summary(df_all)
-    # 依 COUNTY_INFO 順序排
     order = list(COUNTY_INFO.keys())
     s["_ord"] = s["regionName"].apply(lambda x: order.index(x) if x in order else 99)
     s = s.sort_values("_ord").reset_index(drop=True)
 
-    colors_hi = ["#1E40AF" if r == selected else "#93C5FD" for r in s["regionName"]]
-    colors_lo = ["#D97706" if r == selected else "#FCD34D" for r in s["regionName"]]
+    colors_hi = ["#1E40AF" if r == selected_county else "#93C5FD" for r in s["regionName"]]
+    colors_lo = ["#D97706" if r == selected_county else "#FCD34D" for r in s["regionName"]]
     short_names = [COUNTY_INFO.get(r, {}).get("short", r) for r in s["regionName"]]
 
     fig = go.Figure()
@@ -298,17 +399,14 @@ def main():
     )
     st.markdown(CSS, unsafe_allow_html=True)
 
-    # 雲端部署時自動初始化資料庫；若資料為舊版（六大地區）也重建
+    # 雲端部署時自動初始化資料庫；若為舊版六大地區也重建
     def _needs_init() -> bool:
         if not os.path.exists(DB_NAME):
             return True
         try:
             with sqlite3.connect(DB_NAME) as c:
-                rows = c.execute(
-                    f"SELECT DISTINCT regionName FROM {TABLE_NAME} LIMIT 10"
-                ).fetchall()
-                names = {r[0] for r in rows}
-                # 舊版以六大地區命名；縣市版不含這些名稱
+                names = {r[0] for r in c.execute(
+                    f"SELECT DISTINCT regionName FROM {TABLE_NAME} LIMIT 10")}
                 return bool(names & {"北部", "中部", "南部", "東部", "東北部", "東南部"})
         except Exception:
             return True
@@ -337,6 +435,8 @@ def main():
         st.session_state.county_select = counties[0]
     if "pending_county" not in st.session_state:
         st.session_state.pending_county = None
+    if "map_expanded_region" not in st.session_state:
+        st.session_state.map_expanded_region = None   # None = 地區總覽
 
     if st.session_state.pending_county:
         st.session_state.county_select = st.session_state.pending_county
@@ -355,6 +455,11 @@ def main():
         )
 
         selected = st.selectbox("選擇縣市", counties, key="county_select")
+
+        # 選縣市時自動展開對應地區
+        auto_region = COUNTY_TO_REGION.get(selected)
+        if auto_region and st.session_state.map_expanded_region != auto_region:
+            st.session_state.map_expanded_region = auto_region
 
         st.markdown("<div style='margin:16px 0 8px;border-top:1px solid #E2EAFF'></div>",
                     unsafe_allow_html=True)
@@ -422,27 +527,74 @@ def main():
 
     # ── Row 1：地圖 + 折線圖 ──────────────────────────────────
     c1, c2 = st.columns([1, 1], gap="medium")
+    exp_region = st.session_state.map_expanded_region
 
     with c1:
         st.markdown("<div class='card-title'>📍 台灣即時氣溫地圖</div>",
                     unsafe_allow_html=True)
-        st.caption("點擊縣市切換 ‧ 顏色：🔵 涼 → 🔴 熱 ‧ 大圈＝目前選擇")
-        taiwan_map = build_map(df_all, selected)
+
+        # 地圖模式提示 + 返回按鈕
+        col_cap, col_back = st.columns([3, 1])
+        with col_cap:
+            if exp_region:
+                st.caption(f"📂 {exp_region} ‧ 點擊縣市選取 ‧ 顏色：🔵涼→🔴熱")
+            else:
+                st.caption("點擊地區展開縣市 ‧ 顏色：🔵 涼 → 🔴 熱")
+        with col_back:
+            if exp_region:
+                if st.button("◀ 全台", use_container_width=True):
+                    st.session_state.map_expanded_region = None
+                    st.rerun()
+
+        taiwan_map = build_map(df_all, selected, exp_region)
         map_data = st_folium(
             taiwan_map, height=430,
             use_container_width=True,
             returned_objects=["last_object_clicked"],
             key="folium_map",
         )
+
         if map_data and map_data.get("last_object_clicked"):
             c = map_data["last_object_clicked"]
-            for county, info in COUNTY_INFO.items():
-                if (abs(info["lat"] - c.get("lat", 0)) < 0.2 and
-                        abs(info["lon"] - c.get("lng", 0)) < 0.2):
-                    if county != st.session_state.county_select:
-                        st.session_state.pending_county = county
+            lat_c = c.get("lat", 0)
+            lng_c = c.get("lng", 0)
+
+            if exp_region is None:
+                # 地區總覽模式：點擊展開地區
+                for region, info in REGION_INFO.items():
+                    if abs(info["lat"] - lat_c) < 0.4 and abs(info["lon"] - lng_c) < 0.4:
+                        st.session_state.map_expanded_region = region
+                        first = next((x for x in REGION_COUNTIES[region]
+                                      if x in set(counties)), None)
+                        if first and first != selected:
+                            st.session_state.pending_county = first
                         st.rerun()
-                    break
+                        break
+            else:
+                # 縣市展開模式：點縣市選取 / 點地區切換
+                clicked = False
+                for county in REGION_COUNTIES.get(exp_region, []):
+                    if county not in COUNTY_INFO:
+                        continue
+                    info = COUNTY_INFO[county]
+                    if abs(info["lat"] - lat_c) < 0.18 and abs(info["lon"] - lng_c) < 0.18:
+                        if county != selected:
+                            st.session_state.pending_county = county
+                            st.rerun()
+                        clicked = True
+                        break
+                if not clicked:
+                    for region, info in REGION_INFO.items():
+                        if region == exp_region:
+                            continue
+                        if abs(info["lat"] - lat_c) < 0.4 and abs(info["lon"] - lng_c) < 0.4:
+                            st.session_state.map_expanded_region = region
+                            first = next((x for x in REGION_COUNTIES[region]
+                                          if x in set(counties)), None)
+                            if first and first != selected:
+                                st.session_state.pending_county = first
+                            st.rerun()
+                            break
 
     with c2:
         st.markdown(f"<div class='card-title'>📈 {selected} 氣溫趨勢</div>",
