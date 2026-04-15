@@ -292,9 +292,23 @@ def main():
     )
     st.markdown(CSS, unsafe_allow_html=True)
 
+    # 雲端部署時自動初始化資料庫
     if not os.path.exists(DB_NAME):
-        st.error("找不到資料庫，請先執行 `python hw2_3_database.py`")
-        st.stop()
+        with st.spinner("首次啟動，正在從 CWA API 取得資料並建立資料庫…"):
+            try:
+                from hw2_1_fetch import fetch_weather_forecast, save_json
+                from hw2_2_extract import extract_temperatures
+                from hw2_3_database import create_table, insert_temperatures
+                raw = fetch_weather_forecast()
+                save_json(raw)
+                temps = extract_temperatures(raw)
+                with sqlite3.connect(DB_NAME) as conn:
+                    create_table(conn)
+                    insert_temperatures(conn, temps)
+                st.rerun()
+            except Exception as e:
+                st.error(f"資料庫初始化失敗：{e}")
+                st.stop()
 
     # ── Session state ─────────────────────────────────────────
     regions = get_regions()
