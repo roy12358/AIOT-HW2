@@ -3,6 +3,7 @@
 # 使用 CWA API (F-C0032-001) 獲取台灣各縣市未來天氣預報
 # ============================================================
 
+import os
 import requests
 import json
 import urllib3
@@ -11,7 +12,12 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # CWA API 設定
-API_KEY = "CWA-D00DE0B8-D4BC-48E7-A279-D7FC7A2A17B5"
+# 優先從環境變數或 Streamlit Secrets 讀取；本地開發可在 .streamlit/secrets.toml 設定
+try:
+    import streamlit as st
+    API_KEY = st.secrets["CWA_API_KEY"]
+except Exception:
+    API_KEY = os.environ.get("CWA_API_KEY", "")
 BASE_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore"
 DATASET_ID = "F-C0032-001"   # 鄉鎮天氣預報－台灣未來 36 小時天氣預報
 

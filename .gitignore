@@ -3,6 +3,9 @@ data.db
 weather_data.json
 temperatures.json
 
+# Secrets — never commit
+.streamlit/secrets.toml
+
 # Python cache
 __pycache__/
 *.pyc
