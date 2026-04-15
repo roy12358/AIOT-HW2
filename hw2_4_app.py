@@ -420,7 +420,8 @@ def main():
         st.caption("點擊圓圈切換地區 ‧ 顏色：🔵 涼 → 🔴 熱 ‧ 大圈＝目前選擇")
         taiwan_map = build_map(df_all, selected)
         map_data = st_folium(
-            taiwan_map, height=420, width=None,
+            taiwan_map, height=420,
+            use_container_width=True,
             returned_objects=["last_object_clicked"],
             key="folium_map",
         )
