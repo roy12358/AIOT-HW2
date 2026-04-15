@@ -82,9 +82,10 @@ hw2/
 ├── requirements.txt        # Python 相依套件
 ├── .streamlit/
 │   └── config.toml         # Streamlit 主題設定（secrets.toml 不納入版控）
-└── DEVLOG.md               # 開發日誌
+├── DEVLOG.md               # 開發日誌
+└── CONVERSATION.md         # 開發對話摘要
 ```
 
 ---
 
-**資料來源：** [中央氣象署開放資料平台](https://opendata.cwa.gov.tw)（資料集 F-C0032-001）　·　[開發日誌 →](DEVLOG.md)
+**資料來源：** [中央氣象署開放資料平台](https://opendata.cwa.gov.tw)（資料集 F-C0032-001）
