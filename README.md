@@ -2,6 +2,8 @@
 
 **Live Demo：[https://aiot-hw2-zhbpvcebxjznujmr6h3t7e.streamlit.app/](https://aiot-hw2-zhbpvcebxjznujmr6h3t7e.streamlit.app/)**
 
+[開發日誌 →](DEVLOG.md)　·　[對話摘要 →](CONVERSATION.md)
+
 ---
 
 ## 作業說明
@@ -85,4 +87,4 @@ hw2/
 
 ---
 
-**資料來源：** [中央氣象署開放資料平台](https://opendata.cwa.gov.tw)（資料集 F-C0032-001）
+**資料來源：** [中央氣象署開放資料平台](https://opendata.cwa.gov.tw)（資料集 F-C0032-001）　·　[開發日誌 →](DEVLOG.md)
