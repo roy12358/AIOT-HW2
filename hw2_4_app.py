@@ -114,7 +114,7 @@ def marker_html(short: str, maxt: float, mint: float, is_sel: bool) -> str:
 def build_map(df_all: pd.DataFrame, selected: str) -> folium.Map:
     summ = county_summary(df_all).set_index("regionName")
     m = folium.Map(location=[23.8, 120.9], zoom_start=7,
-                   tiles="CartoDB positron", prefer_canvas=True)
+                   tiles="CartoDB positron")
     m.options["zoomControl"] = False
 
     for county, info in COUNTY_INFO.items():
@@ -298,9 +298,23 @@ def main():
     )
     st.markdown(CSS, unsafe_allow_html=True)
 
-    # 雲端部署時自動初始化資料庫
-    if not os.path.exists(DB_NAME):
-        with st.spinner("首次啟動，正在從 CWA API 取得資料並建立資料庫…"):
+    # 雲端部署時自動初始化資料庫；若資料為舊版（六大地區）也重建
+    def _needs_init() -> bool:
+        if not os.path.exists(DB_NAME):
+            return True
+        try:
+            with sqlite3.connect(DB_NAME) as c:
+                rows = c.execute(
+                    f"SELECT DISTINCT regionName FROM {TABLE_NAME} LIMIT 10"
+                ).fetchall()
+                names = {r[0] for r in rows}
+                # 舊版以六大地區命名；縣市版不含這些名稱
+                return bool(names & {"北部", "中部", "南部", "東部", "東北部", "東南部"})
+        except Exception:
+            return True
+
+    if _needs_init():
+        with st.spinner("正在從 CWA API 取得資料並建立資料庫…"):
             try:
                 from hw2_1_fetch import fetch_weather_forecast, save_json
                 from hw2_2_extract import extract_temperatures
@@ -311,6 +325,7 @@ def main():
                 with sqlite3.connect(DB_NAME) as conn:
                     create_table(conn)
                     insert_temperatures(conn, temps)
+                st.cache_data.clear()
                 st.rerun()
             except Exception as e:
                 st.error(f"資料庫初始化失敗：{e}")
