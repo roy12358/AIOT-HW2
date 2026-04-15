@@ -2,7 +2,7 @@
 
 ## 專案概覽
 台灣氣溫預報 Web App，使用 CWA（中央氣象署）開放資料平台 API，
-呈現台灣六大地區的 36 小時天氣預報，包含互動式地圖、折線圖、長條圖與資料表。
+呈現台灣 22 縣市的 36 小時天氣預報，包含兩層互動地圖、折線圖、長條圖與資料表。
 
 **技術棧**：Python 3.13 · requests · SQLite3 · pandas · plotly · folium · Streamlit
 
@@ -14,9 +14,9 @@
 使用 `requests` 呼叫 CWA F-C0032-001 API，取得台灣 22 縣市未來 36 小時天氣預報。
 
 ### 實作
-- 定義 `REGION_COUNTIES` 對應表，將 22 縣市分為六大地區（北/中/南/東北/東/東南部）
 - `fetch_weather_forecast()` 回傳完整 JSON dict
 - `save_json()` 存檔至 `weather_data.json` 供後續步驟讀取
+- API Key 從 `st.secrets["CWA_API_KEY"]` 或環境變數讀取，不硬編碼在程式中
 
 ### 遭遇問題
 **SSL Certificate Error**
@@ -47,42 +47,43 @@ records.location[]
 ```
 
 ### 實作
-- `get_region()` 根據縣市名稱回傳所屬地區
+- `get_region()` 根據縣市名稱回傳所屬六大地區（供內部分類參考）
 - `extract_temperatures()` 逐縣市配對 MinT/MaxT，輸出結構化 list of dict
-- 結果存至 `temperatures.json`，共 3 個時間段 × 22 縣市 = 66 筆
+- 每筆包含 `countyName`、`regionName`、`dataDate`、`mint`、`maxt`
+- 結果存至 `temperatures.json`，共 22 縣市 × 3 時間段 = 66 筆
 
 ---
 
 ## 2026-04-15 — HW2-3：SQLite3 資料庫
 
 ### 目標
-建立 `data.db`，資料表 `TemperatureForecasts`，儲存地區層級的聚合氣溫。
+建立 `data.db`，資料表 `TemperatureForecasts`，以縣市為單位儲存氣溫資料。
 
 ### 資料表 Schema
 ```sql
 CREATE TABLE TemperatureForecasts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    regionName TEXT    NOT NULL,
-    dataDate   TEXT    NOT NULL,
-    mint       INTEGER NOT NULL,
-    maxt       INTEGER NOT NULL
+    regionName TEXT    NOT NULL,   -- 縣市名稱
+    dataDate   TEXT    NOT NULL,   -- 時間段起始時間
+    mint       INTEGER NOT NULL,   -- 最低氣溫 (°C)
+    maxt       INTEGER NOT NULL    -- 最高氣溫 (°C)
 )
 ```
 
 ### 實作
-- 以 (regionName, dataDate) 為 key 聚合：取同地區所有縣市的 mint/maxt 平均值
+- `insert_temperatures()` 直接存入各縣市原始資料，不做地區聚合
 - 每次執行先 `DELETE` 舊資料，確保結果乾淨
-- 寫入後執行三道驗證查詢：地區列表、中部詳細資料、各地區筆數
+- 寫入後執行三道驗證查詢：縣市列表、臺北市詳細資料、各縣市筆數
 
 ### 結果
-6 個地區 × 3 個時間段 = 18 筆資料
+22 個縣市 × 3 個時間段 = 66 筆資料
 
 ---
 
 ## 2026-04-15 ～ 2026-04-16 — HW2-4：Streamlit Web App
 
 ### 目標
-建立互動式 Web App，包含：地區 dropdown、互動地圖、折線圖、長條圖、資料表。
+建立互動式 Web App，包含：縣市 dropdown、互動地圖、折線圖、長條圖、資料表。
 
 ### 版本演進
 
@@ -100,7 +101,7 @@ CREATE TABLE TemperatureForecasts (
 **地圖點擊事件機制**：
 ```python
 map_data = st_folium(taiwan_map, returned_objects=["last_object_clicked"])
-# 以座標距離 < 0.25° 判斷點擊到哪個地區
+# 以座標距離判斷點擊到哪個地區
 ```
 
 **問題**：
@@ -110,19 +111,19 @@ map_data = st_folium(taiwan_map, returned_objects=["last_object_clicked"])
 ---
 
 #### v3 — Session State 修正
-**問題根因**：地圖點擊後直接設定 `st.session_state.region_select`，但此時 selectbox widget 已渲染完畢。
+**問題根因**：地圖點擊後直接設定 `st.session_state.county_select`，但此時 selectbox widget 已渲染完畢。
 
-**解法**：`pending_region` 中介變數，在 script 頂端、widget 渲染前套用：
+**解法**：`pending_county` 中介變數，在 script 頂端、widget 渲染前套用：
 ```python
-if st.session_state.pending_region:
-    st.session_state.region_select = st.session_state.pending_region
-    st.session_state.pending_region = None
-# → 然後才渲染 st.selectbox(key="region_select")
+if st.session_state.pending_county:
+    st.session_state.county_select = st.session_state.pending_county
+    st.session_state.pending_county = None
+# → 然後才渲染 st.selectbox(key="county_select")
 ```
 
 ---
 
-#### v4 — 主題與視覺優化（最終版）
+#### v4 — 主題與視覺優化
 
 **側欄文字問題根本修法**：
 Streamlit CSS 注入無法穩定覆蓋 sidebar 樣式（選擇器優先權被 Streamlit 內部 CSS 覆蓋）。
@@ -139,15 +140,14 @@ font            = "sans serif"
 
 **地圖標記重設計**：
 - `temp_gradient()` 計算溫度對應的 CSS `linear-gradient`（涼藍 → 熱紅）
-- 被選中地區：大圓（64px）+ 藍色邊框 + 光暈 box-shadow
-- 未選中地區：小圓（52px）+ 白色邊框
+- 被選中縣市：大圓（56px）+ 藍色邊框 + 光暈 box-shadow
+- 未選中縣市：小圓（44px）+ 白色邊框
 - 白色粗體文字 + `text-shadow` 提升可讀性
-- tooltip hover 顯示最高/最低溫與涵蓋縣市
 
-**Layout 重構（三列式）**：
+**Layout 架構**：
 ```
 Header Banner
-[KPI: 地區 | 最高均溫 | 最低均溫 | 日夜溫差]
+[KPI: 縣市 | 最高均溫 | 最低均溫 | 日夜溫差]
 [地圖 (50%)] [折線圖 (50%)]
 [詳細表格 (40%)] [全台長條圖 (60%)]
 [全台摘要表]
@@ -165,29 +165,38 @@ li[role="option"] { background: white !important; color: #1E3A8A !important; }
 
 ---
 
-## 部署
+#### v5 — 縣市層級化
 
-```bash
-# 安裝相依套件
-pip install -r requirements.txt
+原本以六大地區聚合儲存（18 筆），改為直接儲存各縣市原始資料（66 筆）。
 
-# 初始化資料庫（需有 weather_data.json 或可存取 CWA API）
-python hw2_3_database.py
+- DB `insert_temperatures()` 移除聚合邏輯，改存 `countyName`
+- App dropdown 改為 22 縣市；地圖加入 `COUNTY_INFO`（22 縣市座標）
+- 長條圖、摘要表改以縣市為單位顯示
+- `prefer_canvas=True` 導致 DivIcon HTML 不渲染，移除後恢復正常
 
-# 啟動 App
-streamlit run hw2_4_app.py
+**雲端資料版本遷移**：
+Cloud 上若 DB 為舊版（含「北部」等地區名），啟動時自動重建：
+```python
+def _needs_init():
+    names = {r[0] for r in conn.execute("SELECT DISTINCT regionName ...")}
+    return bool(names & {"北部", "中部", "南部", ...})
 ```
 
-### 檔案說明
-| 檔案 | 說明 |
-|------|------|
-| `hw2_1_fetch.py` | HW2-1：呼叫 CWA API，存 `weather_data.json` |
-| `hw2_2_extract.py` | HW2-2：解析 JSON，提取 MinT/MaxT |
-| `hw2_3_database.py` | HW2-3：存入 SQLite3 `data.db` |
-| `hw2_4_app.py` | HW2-4：Streamlit Web App |
-| `requirements.txt` | Python 相依套件 |
-| `.streamlit/config.toml` | Streamlit 主題設定 |
+---
 
-### 注意事項
-- CWA SSL 憑證在 Windows Python 3.13 有相容問題，`hw2_1_fetch.py` 使用 `verify=False`
-- `data.db` 與 `weather_data.json` 為執行期產生檔案，不納入版本控制
+#### v6 — 兩層互動地圖（最終版）
+
+22 縣市圓圈同時顯示在地圖上視覺混亂，改為兩層互動設計：
+
+**地區總覽模式**（預設）：
+- 顯示六大地區聚合圓圈（60-72px）
+- 點擊地區 → 切換至縣市展開模式
+
+**縣市展開模式**：
+- `folium.Map.fit_bounds()` 縮放至該地區範圍
+- 顯示該地區各縣市圓圈（44-56px）
+- 其他五個地區以淡化小圓（40px, opacity 0.45）顯示，可點擊切換
+- 「◀ 全台」按鈕返回地區總覽
+
+**側欄與地圖同步**：
+從 dropdown 選取縣市時，`map_expanded_region` 自動更新為對應地區，地圖即時展開。
