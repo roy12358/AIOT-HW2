@@ -22,10 +22,10 @@
 
 ### HW2-2：分析資料，提取最高與最低氣溫
 
-解析 HW2-1 取得的 JSON，從 22 個縣市中提取各時間段的 MinT / MaxT，並對應到台灣六大地區（北部／中部／南部／東北部／東部／東南部）。
+解析 HW2-1 取得的 JSON，從各縣市各時間段提取 MinT / MaxT 數值。
 
 - 使用 `json.dumps` 觀察原始資料結構
-- 輸出結構化資料存至 `temperatures.json`
+- 輸出結構化資料存至 `temperatures.json`（22 縣市 × 3 時間段 = 66 筆）
 
 **程式：** `hw2_2_extract.py`
 
@@ -33,19 +33,19 @@
 
 ### HW2-3：將氣溫資料儲存到 SQLite3 資料庫
 
-將 HW2-2 提取的縣市資料聚合為六大地區（取縣市均值），存入 SQLite3 資料庫 `data.db`。
+將 HW2-2 提取的各縣市氣溫存入 SQLite3 資料庫 `data.db`。
 
 **資料表：** `TemperatureForecasts`
 
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | id | INTEGER | 主鍵（自動遞增） |
-| regionName | TEXT | 地區名稱 |
+| regionName | TEXT | 縣市名稱 |
 | dataDate | TEXT | 時間段起始時間 |
 | mint | INTEGER | 最低氣溫（°C） |
 | maxt | INTEGER | 最高氣溫（°C） |
 
-執行後以三道 SQL 查詢驗證寫入結果：地區列表、中部詳細資料、各地區筆數。
+執行後以三道 SQL 查詢驗證寫入結果：縣市列表、臺北市詳細資料、各縣市筆數。
 
 **程式：** `hw2_3_database.py`
 
@@ -57,13 +57,13 @@
 
 | 元件 | 說明 |
 |------|------|
-| 側欄 Dropdown | 選擇六大地區 |
-| KPI 卡片列 | 地區名稱、平均最高溫、平均最低溫、日夜溫差 |
-| 互動地圖 | folium 地圖，各地區顯示溫度圓圈（點擊切換地區） |
-| 折線圖 | 所選地區 36 小時最高 / 最低溫趨勢 |
-| 詳細資料表 | 所選地區各時間段數據 |
-| 長條圖 | 六大地區平均溫度並排比較 |
-| 全台摘要表 | 各地區均溫與極值一覽 |
+| 側欄 Dropdown | 選擇 22 縣市 |
+| KPI 卡片列 | 縣市名稱、平均最高溫、平均最低溫、日夜溫差 |
+| 互動地圖 | folium 地圖，22 縣市溫度圓圈（點擊切換縣市） |
+| 折線圖 | 所選縣市 36 小時最高 / 最低溫趨勢 |
+| 詳細資料表 | 所選縣市各時間段數據 |
+| 長條圖 | 全台 22 縣市平均溫度並排比較 |
+| 全台摘要表 | 各縣市均溫與極值一覽 |
 
 **程式：** `hw2_4_app.py`
 
@@ -82,45 +82,6 @@ hw2/
 │   └── config.toml         # Streamlit 主題設定（secrets.toml 不納入版控）
 └── DEVLOG.md               # 開發日誌
 ```
-
-## 本地執行
-
-### 1. 安裝相依套件
-```bash
-pip install -r requirements.txt
-```
-
-### 2. 設定 API Key
-
-建立 `.streamlit/secrets.toml`（此檔案不納入版控）：
-```toml
-CWA_API_KEY = "your_api_key_here"
-```
-
-或設定環境變數：
-```bash
-export CWA_API_KEY="your_api_key_here"
-```
-
-### 3. 初始化資料庫
-```bash
-python hw2_3_database.py
-```
-
-### 4. 啟動 App
-```bash
-streamlit run hw2_4_app.py
-```
-
-## Streamlit Cloud 部署
-
-1. Fork 此 repo 至你的 GitHub
-2. 前往 [share.streamlit.io](https://share.streamlit.io)，選擇此 repo，Main file：`hw2_4_app.py`
-3. 在 **Settings → Secrets** 填入：
-   ```toml
-   CWA_API_KEY = "your_api_key_here"
-   ```
-4. 點擊 **Deploy** — 首次啟動會自動初始化資料庫
 
 ---
 

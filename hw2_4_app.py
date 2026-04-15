@@ -1,5 +1,5 @@
 # ============================================================
-# HW2-4: 台灣氣溫預報 Web App  (Final)
+# HW2-4: 台灣氣溫預報 Web App
 # ============================================================
 
 import os
@@ -14,13 +14,30 @@ from streamlit_folium import st_folium
 DB_NAME    = "data.db"
 TABLE_NAME = "TemperatureForecasts"
 
-REGION_INFO = {
-    "北部":  {"lat": 25.05, "lon": 121.52, "counties": "臺北・新北・基隆・桃園・新竹"},
-    "中部":  {"lat": 24.15, "lon": 120.68, "counties": "苗栗・臺中・彰化・南投・雲林"},
-    "南部":  {"lat": 22.65, "lon": 120.35, "counties": "嘉義・臺南・高雄・屏東・澎湖"},
-    "東北部": {"lat": 24.75, "lon": 121.75, "counties": "宜蘭縣"},
-    "東部":  {"lat": 23.85, "lon": 121.55, "counties": "花蓮・臺東"},
-    "東南部": {"lat": 22.35, "lon": 120.90, "counties": "金門・連江"},
+# 22 縣市座標
+COUNTY_INFO = {
+    "臺北市": {"lat": 25.04, "lon": 121.51, "short": "北市"},
+    "新北市": {"lat": 24.98, "lon": 121.46, "short": "新北"},
+    "基隆市": {"lat": 25.13, "lon": 121.74, "short": "基隆"},
+    "桃園市": {"lat": 24.99, "lon": 121.30, "short": "桃園"},
+    "新竹市": {"lat": 24.80, "lon": 120.97, "short": "竹市"},
+    "新竹縣": {"lat": 24.63, "lon": 121.02, "short": "竹縣"},
+    "苗栗縣": {"lat": 24.56, "lon": 120.82, "short": "苗栗"},
+    "臺中市": {"lat": 24.15, "lon": 120.68, "short": "中市"},
+    "彰化縣": {"lat": 24.07, "lon": 120.54, "short": "彰化"},
+    "南投縣": {"lat": 23.96, "lon": 120.97, "short": "南投"},
+    "雲林縣": {"lat": 23.71, "lon": 120.43, "short": "雲林"},
+    "嘉義市": {"lat": 23.48, "lon": 120.45, "short": "嘉市"},
+    "嘉義縣": {"lat": 23.45, "lon": 120.63, "short": "嘉縣"},
+    "臺南市": {"lat": 23.00, "lon": 120.21, "short": "南市"},
+    "高雄市": {"lat": 22.62, "lon": 120.30, "short": "高雄"},
+    "屏東縣": {"lat": 22.55, "lon": 120.62, "short": "屏東"},
+    "澎湖縣": {"lat": 23.57, "lon": 119.58, "short": "澎湖"},
+    "宜蘭縣": {"lat": 24.75, "lon": 121.75, "short": "宜蘭"},
+    "花蓮縣": {"lat": 23.97, "lon": 121.60, "short": "花蓮"},
+    "臺東縣": {"lat": 22.75, "lon": 121.14, "short": "臺東"},
+    "金門縣": {"lat": 24.43, "lon": 118.32, "short": "金門"},
+    "連江縣": {"lat": 26.16, "lon": 119.95, "short": "馬祖"},
 }
 
 
@@ -32,100 +49,95 @@ def load_all() -> pd.DataFrame:
             f"SELECT * FROM {TABLE_NAME} ORDER BY regionName, dataDate", c)
 
 @st.cache_data(ttl=300)
-def load_region(region: str) -> pd.DataFrame:
+def load_county(county: str) -> pd.DataFrame:
     with sqlite3.connect(DB_NAME) as c:
         return pd.read_sql_query(
             f"SELECT * FROM {TABLE_NAME} WHERE regionName=? ORDER BY dataDate",
-            c, params=(region,))
+            c, params=(county,))
 
 @st.cache_data(ttl=300)
-def get_regions() -> list[str]:
+def get_counties() -> list[str]:
     with sqlite3.connect(DB_NAME) as c:
-        return [r[0] for r in c.execute(
-            f"SELECT DISTINCT regionName FROM {TABLE_NAME} ORDER BY regionName")]
+        rows = c.execute(
+            f"SELECT DISTINCT regionName FROM {TABLE_NAME}").fetchall()
+    # 依照 COUNTY_INFO 定義的順序排列
+    order = list(COUNTY_INFO.keys())
+    names = [r[0] for r in rows]
+    return sorted(names, key=lambda x: order.index(x) if x in order else 99)
 
-def region_summary(df: pd.DataFrame) -> pd.DataFrame:
+def county_summary(df: pd.DataFrame) -> pd.DataFrame:
     return (df.groupby("regionName")
             .agg(avg_mint=("mint","mean"), avg_maxt=("maxt","mean"),
                  min_mint=("mint","min"), max_maxt=("maxt","max"))
             .reset_index())
 
 
-# ── 溫度→漸層色 (藍→紅) ─────────────────────────────────────
+# ── 溫度→色彩 ────────────────────────────────────────────────
 def temp_color(t: float, lo=15.0, hi=35.0) -> str:
     p = max(0.0, min(1.0, (t - lo) / (hi - lo)))
-    # 冷：#3B82F6 → 暖：#EF4444
     r = int(59  + p * 177)
     g = int(130 - p * 62)
     b = int(246 - p * 178)
     return f"#{r:02x}{g:02x}{b:02x}"
 
 def temp_gradient(t: float) -> str:
-    """回傳 CSS linear-gradient 字串"""
     base = temp_color(t)
-    # 稍深一點當 gradient 結束色
     p = max(0.0, min(1.0, (t - 15) / 20))
     r2 = int(20  + p * 160)
     g2 = int(100 - p * 60)
     b2 = int(200 - p * 150)
-    dark = f"#{r2:02x}{g2:02x}{b2:02x}"
-    return f"linear-gradient(135deg, {base} 0%, {dark} 100%)"
+    return f"linear-gradient(135deg, {base} 0%, #{r2:02x}{g2:02x}{b2:02x} 100%)"
 
 
 # ── 地圖標記 HTML ────────────────────────────────────────────
-def marker_html(region: str, maxt: float, mint: float, is_sel: bool) -> str:
+def marker_html(short: str, maxt: float, mint: float, is_sel: bool) -> str:
     grad   = temp_gradient(maxt)
-    w      = 64 if is_sel else 52
-    ring   = (f"box-shadow:0 0 0 4px rgba(30,64,175,0.25),"
-              f"0 4px 20px rgba(0,0,0,0.3);" if is_sel else
-              f"box-shadow:0 2px 10px rgba(0,0,0,0.2);")
+    w      = 56 if is_sel else 44
+    ring   = ("box-shadow:0 0 0 3px rgba(30,64,175,0.3),0 3px 14px rgba(0,0,0,0.3);"
+              if is_sel else "box-shadow:0 2px 8px rgba(0,0,0,0.2);")
     border = "border:3px solid #1E40AF;" if is_sel else "border:2px solid rgba(255,255,255,0.8);"
-    fsize  = 12 if is_sel else 10
-    tsize  = 10 if is_sel else 9
     return (
         f'<div style="width:{w}px;height:{w}px;border-radius:50%;background:{grad};'
         f'{border}{ring}'
         f'display:flex;flex-direction:column;align-items:center;justify-content:center;'
-        f'cursor:pointer;transition:transform .15s;">'
-        f'<span style="font-size:{fsize}px;font-weight:900;color:white;'
-        f'text-shadow:0 1px 3px rgba(0,0,0,.7);line-height:1.2;">{region}</span>'
-        f'<span style="font-size:{tsize}px;font-weight:700;color:rgba(255,255,255,.9);'
-        f'text-shadow:0 1px 2px rgba(0,0,0,.6);">{mint:.0f}°~{maxt:.0f}°</span>'
+        f'cursor:pointer;">'
+        f'<span style="font-size:{11 if is_sel else 9}px;font-weight:900;color:white;'
+        f'text-shadow:0 1px 3px rgba(0,0,0,.7);line-height:1.2;">{short}</span>'
+        f'<span style="font-size:{9 if is_sel else 8}px;font-weight:700;'
+        f'color:rgba(255,255,255,.9);text-shadow:0 1px 2px rgba(0,0,0,.6);">'
+        f'{mint:.0f}~{maxt:.0f}°</span>'
         f'</div>'
     )
 
 
 # ── Folium 台灣地圖 ──────────────────────────────────────────
 def build_map(df_all: pd.DataFrame, selected: str) -> folium.Map:
-    summ = region_summary(df_all)
-    m = folium.Map(location=[23.7, 121.0], zoom_start=7,
+    summ = county_summary(df_all).set_index("regionName")
+    m = folium.Map(location=[23.8, 120.9], zoom_start=7,
                    tiles="CartoDB positron", prefer_canvas=True)
-
-    # 隱藏 zoom control（讓地圖更乾淨）
     m.options["zoomControl"] = False
 
-    for _, row in summ.iterrows():
-        region = row["regionName"]
-        info   = REGION_INFO.get(region)
-        if not info:
+    for county, info in COUNTY_INFO.items():
+        if county not in summ.index:
             continue
-        maxt   = float(row["avg_maxt"])
-        mint   = float(row["avg_mint"])
-        is_sel = (region == selected)
-        w      = 64 if is_sel else 52
+        maxt   = float(summ.loc[county, "avg_maxt"])
+        mint   = float(summ.loc[county, "avg_mint"])
+        is_sel = (county == selected)
+        w      = 56 if is_sel else 44
 
         tooltip_html = (
-            f"<div style='font-family:sans-serif;min-width:130px;'>"
-            f"<b style='font-size:15px;color:#1E40AF'>{region}</b><hr style='margin:4px 0'>"
+            f"<div style='font-family:sans-serif;min-width:120px;'>"
+            f"<b style='font-size:14px;color:#1E40AF'>{county}</b>"
+            f"<hr style='margin:4px 0'>"
             f"🌡 最高：<b style='color:#DC2626'>{maxt:.1f}°C</b><br>"
-            f"❄️ 最低：<b style='color:#2563EB'>{mint:.1f}°C</b><br>"
-            f"<small style='color:#64748B'>{info['counties']}</small></div>"
+            f"❄️ 最低：<b style='color:#2563EB'>{mint:.1f}°C</b>"
+            f"</div>"
         )
 
         folium.Marker(
             location=[info["lat"], info["lon"]],
             icon=folium.DivIcon(
-                html=marker_html(region, maxt, mint, is_sel),
+                html=marker_html(info["short"], maxt, mint, is_sel),
                 icon_size=(w, w),
                 icon_anchor=(w // 2, w // 2),
             ),
@@ -136,7 +148,7 @@ def build_map(df_all: pd.DataFrame, selected: str) -> folium.Map:
 
 
 # ── 折線圖 ────────────────────────────────────────────────────
-def build_line(df: pd.DataFrame, region: str) -> go.Figure:
+def build_line(df: pd.DataFrame, county: str) -> go.Figure:
     def fmt(s):
         p = str(s).split(" ")
         return f"{p[0][5:].replace('-','/')} {p[1][:5]}" if len(p)==2 else s
@@ -179,33 +191,40 @@ def build_line(df: pd.DataFrame, region: str) -> go.Figure:
     return fig
 
 
-# ── 長條圖 ────────────────────────────────────────────────────
+# ── 長條圖（全台各縣市）────────────────────────────────────
 def build_bar(df_all: pd.DataFrame, selected: str) -> go.Figure:
-    s = region_summary(df_all)
+    s = county_summary(df_all)
+    # 依 COUNTY_INFO 順序排
+    order = list(COUNTY_INFO.keys())
+    s["_ord"] = s["regionName"].apply(lambda x: order.index(x) if x in order else 99)
+    s = s.sort_values("_ord").reset_index(drop=True)
+
+    colors_hi = ["#1E40AF" if r == selected else "#93C5FD" for r in s["regionName"]]
+    colors_lo = ["#D97706" if r == selected else "#FCD34D" for r in s["regionName"]]
+    short_names = [COUNTY_INFO.get(r, {}).get("short", r) for r in s["regionName"]]
+
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        x=s["regionName"], y=s["avg_maxt"], name="平均最高",
-        marker_color=["#1E40AF" if r==selected else "#93C5FD"
-                      for r in s["regionName"]],
-        text=[f"{v:.1f}°" for v in s["avg_maxt"]],
-        textposition="outside", textfont=dict(size=10),
+        x=short_names, y=s["avg_maxt"], name="平均最高",
+        marker_color=colors_hi,
+        text=[f"{v:.0f}°" for v in s["avg_maxt"]],
+        textposition="outside", textfont=dict(size=9),
         hovertemplate="%{x} 最高：%{y:.1f}°C<extra></extra>",
     ))
     fig.add_trace(go.Bar(
-        x=s["regionName"], y=s["avg_mint"], name="平均最低",
-        marker_color=["#D97706" if r==selected else "#FCD34D"
-                      for r in s["regionName"]],
-        text=[f"{v:.1f}°" for v in s["avg_mint"]],
-        textposition="outside", textfont=dict(size=10),
+        x=short_names, y=s["avg_mint"], name="平均最低",
+        marker_color=colors_lo,
+        text=[f"{v:.0f}°" for v in s["avg_mint"]],
+        textposition="outside", textfont=dict(size=9),
         hovertemplate="%{x} 最低：%{y:.1f}°C<extra></extra>",
     ))
     fig.update_layout(
         barmode="group", plot_bgcolor="#FAFCFF", paper_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(showgrid=False, tickfont=dict(size=11, color="#334155")),
+        xaxis=dict(showgrid=False, tickfont=dict(size=9, color="#334155"),
+                   tickangle=-45),
         yaxis=dict(showgrid=True, gridcolor="#E9EEF6", ticksuffix="°"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                    font=dict(size=11)),
-        margin=dict(l=30, r=10, t=30, b=30), height=250,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=11)),
+        margin=dict(l=30, r=10, t=30, b=60), height=270,
     )
     return fig
 
@@ -217,7 +236,6 @@ CSS = """
 
 html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
 
-/* Header */
 .hdr {
   background: linear-gradient(135deg,#1E40AF 0%,#2563EB 60%,#3B82F6 100%);
   border-radius:16px; padding:20px 28px; margin-bottom:20px;
@@ -230,7 +248,6 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
 }
 .hdr .sub { color:rgba(255,255,255,.78); font-size:.82rem; margin-top:3px; }
 
-/* KPI row */
 .kpi-wrap { display:flex; gap:14px; margin-bottom:18px; }
 .kpi {
   flex:1; background:white; border-radius:14px;
@@ -248,22 +265,13 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
 .kpi-val.i  { color:#4338CA; }
 .kpi-val.a  { color:#B45309; }
 
-/* Section card */
-.card {
-  background:white; border-radius:14px; padding:18px;
-  box-shadow:0 2px 10px rgba(30,64,175,.07);
-  border:1px solid #E2EAFF; height:100%;
-}
 .card-title {
   font-family:'Fira Code',monospace; font-size:.78rem; font-weight:700;
   color:#1E40AF; text-transform:uppercase; letter-spacing:.07em;
   padding-bottom:10px; border-bottom:2px solid #DBEAFE; margin-bottom:12px;
 }
 
-/* Folium map container: 移除預設白底 */
-.folium-map { border-radius:10px; overflow:hidden; }
-
-/* ── Dropdown 選項白底（全域）── */
+/* Dropdown 選項白底（全域） */
 div[data-baseweb="popover"] > div { background:white !important; }
 ul[data-baseweb="menu"], [data-baseweb="menu"] ul { background:white !important; }
 li[role="option"]              { background:white !important; color:#1E3A8A !important; }
@@ -271,11 +279,9 @@ li[role="option"]:hover        { background:#EFF6FF !important; }
 li[aria-selected="true"]       { background:#DBEAFE !important;
                                   color:#1E40AF !important; font-weight:700 !important; }
 
-/* Table header */
 thead th { background:#1E40AF !important; color:white !important;
            font-family:'Fira Code',monospace !important; }
 
-/* Hide Streamlit chrome */
 #MainMenu, footer, header { visibility:hidden; }
 .block-container { padding-top:.8rem !important; }
 </style>
@@ -311,16 +317,15 @@ def main():
                 st.stop()
 
     # ── Session state ─────────────────────────────────────────
-    regions = get_regions()
-    if "region_select" not in st.session_state:
-        st.session_state.region_select = regions[0]
-    if "pending_region" not in st.session_state:
-        st.session_state.pending_region = None
+    counties = get_counties()
+    if "county_select" not in st.session_state:
+        st.session_state.county_select = counties[0]
+    if "pending_county" not in st.session_state:
+        st.session_state.pending_county = None
 
-    # 地圖點擊後 pending → 在 widget 渲染前套用
-    if st.session_state.pending_region:
-        st.session_state.region_select = st.session_state.pending_region
-        st.session_state.pending_region = None
+    if st.session_state.pending_county:
+        st.session_state.county_select = st.session_state.pending_county
+        st.session_state.pending_county = None
 
     # ── Sidebar ───────────────────────────────────────────────
     with st.sidebar:
@@ -334,18 +339,7 @@ def main():
             unsafe_allow_html=True
         )
 
-        selected = st.selectbox("選擇地區", regions, key="region_select")
-
-        counties = REGION_INFO.get(selected, {}).get("counties", "")
-        st.markdown(
-            f"<div style='background:#EFF6FF;border-radius:10px;padding:12px 14px;"
-            f"border:1px solid #BFDBFE;margin-top:4px'>"
-            f"<div style='font-size:.67rem;color:#64748B;text-transform:uppercase;"
-            f"letter-spacing:.05em;margin-bottom:5px'>📌 涵蓋縣市</div>"
-            f"<div style='font-size:.85rem;font-weight:600;color:#1E40AF'>"
-            f"{counties}</div></div>",
-            unsafe_allow_html=True
-        )
+        selected = st.selectbox("選擇縣市", counties, key="county_select")
 
         st.markdown("<div style='margin:16px 0 8px;border-top:1px solid #E2EAFF'></div>",
                     unsafe_allow_html=True)
@@ -390,16 +384,16 @@ def main():
 
     # ── 載入資料 ──────────────────────────────────────────────
     df_all    = load_all()
-    df_region = load_region(selected)
+    df_county = load_county(selected)
 
     # ── KPI ──────────────────────────────────────────────────
-    if not df_region.empty:
-        avg_hi = df_region["maxt"].mean()
-        avg_lo = df_region["mint"].mean()
+    if not df_county.empty:
+        avg_hi = df_county["maxt"].mean()
+        avg_lo = df_county["mint"].mean()
         diff   = avg_hi - avg_lo
         st.markdown(
             f"<div class='kpi-wrap'>"
-            f"<div class='kpi'><div class='kpi-lbl'>📍 地區</div>"
+            f"<div class='kpi'><div class='kpi-lbl'>📍 縣市</div>"
             f"<div class='kpi-val b'>{selected}</div></div>"
             f"<div class='kpi'><div class='kpi-lbl'>🌡 最高溫（均）</div>"
             f"<div class='kpi-val r'>{avg_hi:.1f}°C</div></div>"
@@ -417,29 +411,29 @@ def main():
     with c1:
         st.markdown("<div class='card-title'>📍 台灣即時氣溫地圖</div>",
                     unsafe_allow_html=True)
-        st.caption("點擊圓圈切換地區 ‧ 顏色：🔵 涼 → 🔴 熱 ‧ 大圈＝目前選擇")
+        st.caption("點擊縣市切換 ‧ 顏色：🔵 涼 → 🔴 熱 ‧ 大圈＝目前選擇")
         taiwan_map = build_map(df_all, selected)
         map_data = st_folium(
-            taiwan_map, height=420,
+            taiwan_map, height=430,
             use_container_width=True,
             returned_objects=["last_object_clicked"],
             key="folium_map",
         )
         if map_data and map_data.get("last_object_clicked"):
             c = map_data["last_object_clicked"]
-            for r, info in REGION_INFO.items():
-                if (abs(info["lat"] - c.get("lat",0)) < 0.25 and
-                        abs(info["lon"] - c.get("lng",0)) < 0.25):
-                    if r != st.session_state.region_select:
-                        st.session_state.pending_region = r
+            for county, info in COUNTY_INFO.items():
+                if (abs(info["lat"] - c.get("lat", 0)) < 0.2 and
+                        abs(info["lon"] - c.get("lng", 0)) < 0.2):
+                    if county != st.session_state.county_select:
+                        st.session_state.pending_county = county
                         st.rerun()
                     break
 
     with c2:
         st.markdown(f"<div class='card-title'>📈 {selected} 氣溫趨勢</div>",
                     unsafe_allow_html=True)
-        if not df_region.empty:
-            st.plotly_chart(build_line(df_region, selected),
+        if not df_county.empty:
+            st.plotly_chart(build_line(df_county, selected),
                             use_container_width=True,
                             config={"displayModeBar": False})
 
@@ -450,8 +444,8 @@ def main():
     with c3:
         st.markdown(f"<div class='card-title'>📋 {selected} 詳細資料</div>",
                     unsafe_allow_html=True)
-        if not df_region.empty:
-            df_show = df_region[["dataDate","mint","maxt"]].copy()
+        if not df_county.empty:
+            df_show = df_county[["dataDate","mint","maxt"]].copy()
             df_show["dataDate"] = df_show["dataDate"].apply(
                 lambda s: s.split(" ")[1][:5] if " " in str(s) else s)
             df_show.columns = ["時段", "最低(°C)", "最高(°C)"]
@@ -468,10 +462,10 @@ def main():
                                    "background-color":"white"})
             )
             st.dataframe(styled, use_container_width=True,
-                         hide_index=True, height=190)
+                         hide_index=True, height=165)
 
     with c4:
-        st.markdown("<div class='card-title'>📊 全台各地區溫度對比</div>",
+        st.markdown("<div class='card-title'>📊 全台各縣市溫度對比</div>",
                     unsafe_allow_html=True)
         st.plotly_chart(build_bar(df_all, selected),
                         use_container_width=True,
@@ -479,13 +473,16 @@ def main():
 
     # ── Row 3：全台摘要 ───────────────────────────────────────
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    st.markdown("<div class='card-title'>🌏 全台地區溫度摘要</div>",
+    st.markdown("<div class='card-title'>🌏 全台縣市溫度摘要</div>",
                 unsafe_allow_html=True)
-    summ = region_summary(df_all).round(1)
-    summ.columns = ["地區","平均最低(°C)","平均最高(°C)","最低極值(°C)","最高極值(°C)"]
+    summ = county_summary(df_all)
+    order = list(COUNTY_INFO.keys())
+    summ["_ord"] = summ["regionName"].apply(lambda x: order.index(x) if x in order else 99)
+    summ = summ.sort_values("_ord").drop(columns="_ord").round(1).reset_index(drop=True)
+    summ.columns = ["縣市","平均最低(°C)","平均最高(°C)","最低極值(°C)","最高極值(°C)"]
 
     def hl(row):
-        bg = "background:#DBEAFE;font-weight:700" if row["地區"]==selected else "background:white"
+        bg = "background:#DBEAFE;font-weight:700" if row["縣市"]==selected else "background:white"
         return [bg]*len(row)
 
     styled_s = (
@@ -495,8 +492,7 @@ def main():
              subset=["平均最低(°C)","最低極值(°C)"])
         .map(lambda _: "color:#DC2626;font-weight:600;font-family:'Fira Code',monospace",
              subset=["平均最高(°C)","最高極值(°C)"])
-        .map(lambda _: "color:#1E40AF;font-weight:700",
-             subset=["地區"])
+        .map(lambda _: "color:#1E40AF;font-weight:700", subset=["縣市"])
         .format({"平均最低(°C)":"{:.1f}","平均最高(°C)":"{:.1f}",
                  "最低極值(°C)":"{:.0f}","最高極值(°C)":"{:.0f}"})
         .set_properties(**{"text-align":"center","font-size":"13px"})
