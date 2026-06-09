@@ -435,15 +435,24 @@ def main():
 
     # ── Session state ─────────────────────────────────────────
     counties = get_counties()
+    REGIONS  = [r for r in REGION_COUNTIES
+                if any(c in counties for c in REGION_COUNTIES[r])]
+
     if "county_select" not in st.session_state:
         st.session_state.county_select = counties[0]
+    if "region_select" not in st.session_state:
+        st.session_state.region_select = COUNTY_TO_REGION.get(counties[0], REGIONS[0])
     if "pending_county" not in st.session_state:
         st.session_state.pending_county = None
     if "map_expanded_region" not in st.session_state:
         st.session_state.map_expanded_region = None   # None = 地區總覽
 
+    # 地圖點選縣市 → 同步兩個下拉選單（地區 + 縣市）
     if st.session_state.pending_county:
-        st.session_state.county_select = st.session_state.pending_county
+        c = st.session_state.pending_county
+        st.session_state.county_select = c
+        st.session_state.region_select = COUNTY_TO_REGION.get(
+            c, st.session_state.region_select)
         st.session_state.pending_county = None
 
     # ── Sidebar ───────────────────────────────────────────────
@@ -458,12 +467,23 @@ def main():
             unsafe_allow_html=True
         )
 
-        selected = st.selectbox("選擇縣市", counties, key="county_select")
+        # 第一層下拉：選地區（六大地區）
+        selected_region = st.selectbox("選擇地區", REGIONS, key="region_select")
+        region_changed  = st.session_state.get("_prev_region") != selected_region
+        st.session_state._prev_region = selected_region
 
-        # 選縣市時自動展開對應地區
-        auto_region = COUNTY_TO_REGION.get(selected)
-        if auto_region and st.session_state.map_expanded_region != auto_region:
-            st.session_state.map_expanded_region = auto_region
+        # 第二層下拉：選該地區的縣市（縣市清單隨地區連動）
+        region_counties = [c for c in counties
+                           if COUNTY_TO_REGION.get(c) == selected_region]
+        if st.session_state.county_select not in region_counties:
+            st.session_state.county_select = region_counties[0]
+        selected = st.selectbox("選擇縣市", region_counties, key="county_select")
+        county_changed = st.session_state.get("_prev_county") != selected
+        st.session_state._prev_county = selected
+
+        # 任一下拉變動時，地圖展開對應地區（按「◀ 全台」時不覆蓋，可回總覽）
+        if region_changed or county_changed:
+            st.session_state.map_expanded_region = selected_region
 
         st.markdown("<div style='margin:16px 0 8px;border-top:1px solid #E2EAFF'></div>",
                     unsafe_allow_html=True)
