@@ -455,7 +455,7 @@ def main():
             c, st.session_state.region_select)
         st.session_state.pending_county = None
 
-    # ── Sidebar ───────────────────────────────────────────────
+    # ── Sidebar（僅放品牌標誌；操作控制項改放主畫面，避免側邊欄收合時看不到）──
     with st.sidebar:
         st.markdown(
             "<div style='text-align:center;padding:8px 0 18px'>"
@@ -463,56 +463,7 @@ def main():
             "<div style='font-family:Fira Code,monospace;font-weight:700;"
             "font-size:1rem;color:#1E40AF'>台灣氣溫預報</div>"
             "<div style='font-size:.72rem;color:#94A3B8;margin-top:2px'>"
-            "CWA Open Data</div></div>",
-            unsafe_allow_html=True
-        )
-
-        # 第一層下拉：選地區（六大地區）
-        selected_region = st.selectbox("選擇地區", REGIONS, key="region_select")
-        region_changed  = st.session_state.get("_prev_region") != selected_region
-        st.session_state._prev_region = selected_region
-
-        # 第二層下拉：選該地區的縣市（縣市清單隨地區連動）
-        region_counties = [c for c in counties
-                           if COUNTY_TO_REGION.get(c) == selected_region]
-        if st.session_state.county_select not in region_counties:
-            st.session_state.county_select = region_counties[0]
-        selected = st.selectbox("選擇縣市", region_counties, key="county_select")
-        county_changed = st.session_state.get("_prev_county") != selected
-        st.session_state._prev_county = selected
-
-        # 任一下拉變動時，地圖展開對應地區（按「◀ 全台」時不覆蓋，可回總覽）
-        if region_changed or county_changed:
-            st.session_state.map_expanded_region = selected_region
-
-        st.markdown("<div style='margin:16px 0 8px;border-top:1px solid #E2EAFF'></div>",
-                    unsafe_allow_html=True)
-
-        if st.button("📡 更新天氣資料", use_container_width=True, type="primary"):
-            with st.spinner("從 CWA API 取得資料中…"):
-                try:
-                    from hw2_1_fetch import fetch_weather_forecast, save_json
-                    from hw2_2_extract import extract_temperatures
-                    from hw2_3_database import create_table, insert_temperatures
-                    raw   = fetch_weather_forecast()
-                    save_json(raw)
-                    temps = extract_temperatures(raw)
-                    with sqlite3.connect(DB_NAME) as conn:
-                        create_table(conn)
-                        insert_temperatures(conn, temps)
-                    st.cache_data.clear()
-                    st.success("✅ 更新完成！")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ {e}")
-
-        if st.button("🔄 重新整理畫面", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-
-        st.markdown(
-            "<div style='font-size:.68rem;color:#94A3B8;text-align:center;"
-            "margin-top:12px'>資料集：CWA F-D0047-091（未來一週）</div>",
+            "CWA Open Data<br>資料集 F-D0047-091（未來一週）</div></div>",
             unsafe_allow_html=True
         )
 
@@ -525,6 +476,59 @@ def main():
         "</div>",
         unsafe_allow_html=True
     )
+
+    # ── 控制列：地區 / 縣市下拉 + 動作按鈕（放主畫面，側邊欄收合也一定看得到）──
+    ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([3, 3, 2, 2], gap="small")
+
+    with ctrl1:
+        # 第一層下拉：選地區（六大地區）
+        selected_region = st.selectbox("選擇地區", REGIONS, key="region_select")
+        region_changed  = st.session_state.get("_prev_region") != selected_region
+        st.session_state._prev_region = selected_region
+
+    with ctrl2:
+        # 第二層下拉：選該地區的縣市（縣市清單隨地區連動）
+        region_counties = [c for c in counties
+                           if COUNTY_TO_REGION.get(c) == selected_region]
+        if st.session_state.county_select not in region_counties:
+            st.session_state.county_select = region_counties[0]
+        selected = st.selectbox("選擇縣市", region_counties, key="county_select")
+        county_changed = st.session_state.get("_prev_county") != selected
+        st.session_state._prev_county = selected
+
+    # 任一下拉變動時，地圖展開對應地區（按「◀ 全台」時不覆蓋，可回總覽）
+    if region_changed or county_changed:
+        st.session_state.map_expanded_region = selected_region
+
+    with ctrl3:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        update_clicked = st.button("📡 更新天氣資料",
+                                   use_container_width=True, type="primary")
+    with ctrl4:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        refresh_clicked = st.button("🔄 重新整理", use_container_width=True)
+
+    if update_clicked:
+        with st.spinner("從 CWA API 取得資料中…"):
+            try:
+                from hw2_1_fetch import fetch_weather_forecast, save_json
+                from hw2_2_extract import extract_temperatures
+                from hw2_3_database import create_table, insert_temperatures
+                raw   = fetch_weather_forecast()
+                save_json(raw)
+                temps = extract_temperatures(raw)
+                with sqlite3.connect(DB_NAME) as conn:
+                    create_table(conn)
+                    insert_temperatures(conn, temps)
+                st.cache_data.clear()
+                st.success("✅ 更新完成！")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ {e}")
+
+    if refresh_clicked:
+        st.cache_data.clear()
+        st.rerun()
 
     # ── 載入資料 ──────────────────────────────────────────────
     df_all    = load_all()
