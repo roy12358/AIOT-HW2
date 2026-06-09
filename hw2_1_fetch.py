@@ -1,6 +1,6 @@
 # ============================================================
 # HW2-1: 獲取天氣預報資料
-# 使用 CWA API (F-C0032-001) 獲取台灣各縣市未來天氣預報
+# 使用 CWA API (F-D0047-091) 獲取台灣各縣市「未來一週」天氣預報
 # ============================================================
 
 import os
@@ -19,7 +19,7 @@ try:
 except Exception:
     API_KEY = os.environ.get("CWA_API_KEY", "")
 BASE_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore"
-DATASET_ID = "F-C0032-001"   # 鄉鎮天氣預報－台灣未來 36 小時天氣預報
+DATASET_ID = "F-D0047-091"   # 鄉鎮天氣預報－臺灣各縣市未來一週天氣預報（一次涵蓋 22 縣市）
 
 # 台灣六大地區縣市對應表
 REGION_COUNTIES = {
@@ -76,21 +76,25 @@ if __name__ == "__main__":
     print("...\n（完整資料請見 weather_data.json）")
 
     # 3. 列出資料重點統計
-    locations = weather_data["records"]["location"]
+    #    F-D0047-091 結構：records → Locations[0] → Location[]（22 縣市）
+    locations = weather_data["records"]["Locations"][0]["Location"]
     print("\n" + "=" * 60)
     print("【資料結構分析】")
     print("=" * 60)
     print(f"總縣市數量  : {len(locations)}")
 
     first = locations[0]
-    elements = [e["elementName"] for e in first["weatherElement"]]
-    time_periods = len(first["weatherElement"][0]["time"])
-    print(f"第一筆縣市  : {first['locationName']}")
+    elements = [e["ElementName"] for e in first["WeatherElement"]]
+    maxt_elem = next(e for e in first["WeatherElement"]
+                     if e["ElementName"] == "最高溫度")
+    time_periods = len(maxt_elem["Time"])
+    print(f"第一筆縣市  : {first['LocationName']}")
     print(f"天氣要素    : {elements}")
-    print(f"時間段數量  : {time_periods} 段")
-    print(f"\n各時間段起訖：")
-    for t in first["weatherElement"][0]["time"]:
-        print(f"  {t['startTime']}  →  {t['endTime']}")
+    print(f"時間段數量  : {time_periods} 段（12 小時為一段，共涵蓋約一週）")
+    print(f"\n最高溫度各時間段起訖：")
+    for t in maxt_elem["Time"]:
+        print(f"  {t['StartTime']}  →  {t['EndTime']}"
+              f"   {t['ElementValue'][0]['MaxTemperature']}°C")
 
     # 4. 存檔供後續步驟讀取
     save_json(weather_data)

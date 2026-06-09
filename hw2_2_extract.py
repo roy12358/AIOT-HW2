@@ -23,45 +23,61 @@ def get_region(county_name: str) -> str:
 
 def extract_temperatures(data: dict) -> list[dict]:
     """
-    從 F-C0032-001 JSON 中提取每縣市、每時間段的最高 / 最低氣溫。
+    從 F-D0047-091 JSON 中提取每縣市「未來一週、每日」的最高 / 最低氣溫。
 
-    CWA JSON 結構（重點欄位）：
+    CWA 一週預報 JSON 結構（重點欄位）：
       records
-        └─ location[]
-             ├─ locationName          # 縣市名
-             └─ weatherElement[]
-                  ├─ elementName      # "MinT" / "MaxT" / "Wx" / "PoP" / "CI"
-                  └─ time[]
-                       ├─ startTime
-                       ├─ endTime
-                       └─ parameter
-                            └─ parameterName   # 溫度數值（字串）
+        └─ Locations[0]                  # 整包資料，LocationsName = "台灣"
+             └─ Location[]               # 22 個縣市
+                  ├─ LocationName        # 縣市名，例如「臺中市」
+                  └─ WeatherElement[]
+                       ├─ ElementName    # "最高溫度" / "最低溫度" / "天氣現象" …
+                       └─ Time[]         # 14 段（每段 12 小時，共約 7 天）
+                            ├─ StartTime # 例如 "2026-06-09T12:00:00+08:00"
+                            ├─ EndTime
+                            └─ ElementValue[0]
+                                 └─ MaxTemperature / MinTemperature  # 溫度字串
 
-    回傳：每筆包含 regionName, countyName, dataDate, endTime, mint, maxt
+    原始資料是 12 小時一段（日 / 夜），這裡依日期彙整成「每日」：
+      該日最高溫 = 當日各段最高溫的最大值
+      該日最低溫 = 當日各段最低溫的最小值
+    回傳：每縣市約 7 筆，每筆含 regionName, countyName, dataDate, mint, maxt
     """
     records = []
 
-    for location in data["records"]["location"]:
-        county_name = location["locationName"]
+    for location in data["records"]["Locations"][0]["Location"]:
+        county_name = location["LocationName"]
         region_name = get_region(county_name)
 
-        # 找出 MinT 與 MaxT 兩個 element
-        mint_times, maxt_times = [], []
-        for element in location["weatherElement"]:
-            if element["elementName"] == "MinT":
-                mint_times = element["time"]
-            elif element["elementName"] == "MaxT":
-                maxt_times = element["time"]
+        # 找出「最高溫度」與「最低溫度」兩個 element 的時間序列
+        maxt_times, mint_times = [], []
+        for element in location["WeatherElement"]:
+            if element["ElementName"] == "最高溫度":
+                maxt_times = element["Time"]
+            elif element["ElementName"] == "最低溫度":
+                mint_times = element["Time"]
 
-        # 逐時間段配對提取
-        for mint_t, maxt_t in zip(mint_times, maxt_times):
+        # 依「日期」彙整各 12 小時時段（StartTime 前 10 碼 = YYYY-MM-DD）
+        daily: dict[str, dict] = {}
+        for maxt_t, mint_t in zip(maxt_times, mint_times):
+            day = maxt_t["StartTime"][:10]            # "2026-06-09"
+            try:
+                maxv = int(maxt_t["ElementValue"][0]["MaxTemperature"])
+                minv = int(mint_t["ElementValue"][0]["MinTemperature"])
+            except (ValueError, KeyError, IndexError):
+                continue                              # 跳過缺值（CWA 偶爾回傳 "-"）
+            d = daily.setdefault(day, {"maxt": maxv, "mint": minv})
+            d["maxt"] = max(d["maxt"], maxv)
+            d["mint"] = min(d["mint"], minv)
+
+        # 依日期排序後輸出每日一筆
+        for day in sorted(daily):
             records.append({
                 "regionName": region_name,
                 "countyName":  county_name,
-                "dataDate":    mint_t["startTime"],
-                "endTime":     mint_t["endTime"],
-                "mint":        int(mint_t["parameter"]["parameterName"]),
-                "maxt":        int(maxt_t["parameter"]["parameterName"]),
+                "dataDate":    day,                   # "2026-06-09"
+                "mint":        daily[day]["mint"],
+                "maxt":        daily[day]["maxt"],
             })
 
     return records

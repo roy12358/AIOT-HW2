@@ -63,16 +63,18 @@ def verify_database(conn: sqlite3.Connection) -> None:
     for (name,) in cursor.fetchall():
         print(f"  • {name}")
 
-    # 查詢 2：臺北市氣溫資料
+    # 查詢 2：中部地區的氣溫資料（regionName 欄位存的是縣市名，故用中部各縣市篩選）
+    central = ("苗栗縣", "臺中市", "彰化縣", "南投縣", "雲林縣")
     print("\n" + "=" * 60)
-    print("【查詢 2：臺北市的氣溫資料】")
+    print("【查詢 2：中部地區的氣溫資料】")
     print("=" * 60)
+    placeholders = ",".join("?" * len(central))
     cursor.execute(f"""
         SELECT id, regionName, dataDate, mint, maxt
         FROM   {TABLE_NAME}
-        WHERE  regionName = '臺北市'
-        ORDER  BY dataDate
-    """)
+        WHERE  regionName IN ({placeholders})
+        ORDER  BY regionName, dataDate
+    """, central)
     rows = cursor.fetchall()
     header = f"{'ID':<5}  {'縣市':<6}  {'時間':<22}  {'最低溫(°C)':<12}  {'最高溫(°C)':<12}"
     print(header)

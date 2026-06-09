@@ -252,8 +252,8 @@ def build_map(df_all: pd.DataFrame, selected_county: str,
 # ── 折線圖 ────────────────────────────────────────────────────
 def build_line(df: pd.DataFrame, county: str) -> go.Figure:
     def fmt(s):
-        p = str(s).split(" ")
-        return f"{p[0][5:].replace('-','/')} {p[1][:5]}" if len(p)==2 else s
+        # dataDate 為每日資料 "2026-06-09" → 顯示 "06/09"
+        return str(s)[5:].replace("-", "/")
     labels = [fmt(t) for t in df["dataDate"]]
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -399,7 +399,7 @@ def main():
     )
     st.markdown(CSS, unsafe_allow_html=True)
 
-    # 雲端部署時自動初始化資料庫；若為舊版六大地區也重建
+    # 雲端部署時自動初始化資料庫；舊版六大地區、或舊版 36 小時資料（天數過少）皆重建
     def _needs_init() -> bool:
         if not os.path.exists(DB_NAME):
             return True
@@ -407,7 +407,11 @@ def main():
             with sqlite3.connect(DB_NAME) as c:
                 names = {r[0] for r in c.execute(
                     f"SELECT DISTINCT regionName FROM {TABLE_NAME} LIMIT 10")}
-                return bool(names & {"北部", "中部", "南部", "東部", "東北部", "東南部"})
+                if names & {"北部", "中部", "南部", "東部", "東北部", "東南部"}:
+                    return True   # 舊版以六大地區為單位
+                n_days = c.execute(
+                    f"SELECT COUNT(DISTINCT dataDate) FROM {TABLE_NAME}").fetchone()[0]
+                return n_days < 5  # 舊版 36 小時資料只有 3 天 → 需升級為一週
         except Exception:
             return True
 
@@ -488,7 +492,7 @@ def main():
 
         st.markdown(
             "<div style='font-size:.68rem;color:#94A3B8;text-align:center;"
-            "margin-top:12px'>資料集：CWA F-C0032-001</div>",
+            "margin-top:12px'>資料集：CWA F-D0047-091（未來一週）</div>",
             unsafe_allow_html=True
         )
 
@@ -497,7 +501,7 @@ def main():
         "<div class='hdr'>"
         "<div style='font-size:2.2rem'>🗺️</div>"
         "<div><h1>台灣氣溫預報 Web App</h1>"
-        "<div class='sub'>中央氣象署（CWA）開放資料平台 ‧ 即時天氣預報</div></div>"
+        "<div class='sub'>中央氣象署（CWA）開放資料平台 ‧ 未來一週天氣預報</div></div>"
         "</div>",
         unsafe_allow_html=True
     )
@@ -614,8 +618,8 @@ def main():
         if not df_county.empty:
             df_show = df_county[["dataDate","mint","maxt"]].copy()
             df_show["dataDate"] = df_show["dataDate"].apply(
-                lambda s: s.split(" ")[1][:5] if " " in str(s) else s)
-            df_show.columns = ["時段", "最低(°C)", "最高(°C)"]
+                lambda s: str(s)[5:].replace("-", "/"))   # "2026-06-09" → "06/09"
+            df_show.columns = ["日期", "最低(°C)", "最高(°C)"]
             styled = (
                 df_show.style
                 .map(lambda _: "color:#1D4ED8;font-weight:700;"

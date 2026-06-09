@@ -2,7 +2,7 @@
 
 ## 專案概覽
 台灣氣溫預報 Web App，使用 CWA（中央氣象署）開放資料平台 API，
-呈現台灣 22 縣市的 36 小時天氣預報，包含兩層互動地圖、折線圖、長條圖與資料表。
+呈現台灣 22 縣市的未來一週天氣預報，包含兩層互動地圖、折線圖、長條圖與資料表。
 
 **技術棧**：Python 3.13 · requests · SQLite3 · pandas · plotly · folium · Streamlit
 
@@ -11,7 +11,7 @@
 ## 2026-04-15 — HW2-1：API 資料抓取
 
 ### 目標
-使用 `requests` 呼叫 CWA F-C0032-001 API，取得台灣 22 縣市未來 36 小時天氣預報。
+使用 `requests` 呼叫 CWA F-D0047-091 API，取得台灣 22 縣市未來一週天氣預報。
 
 ### 實作
 - `fetch_weather_forecast()` 回傳完整 JSON dict
@@ -32,25 +32,25 @@ CWA 的 SSL 憑證在 Windows Python 3.13 上驗證失敗。
 ## 2026-04-15 — HW2-2：JSON 解析與資料提取
 
 ### 目標
-從 `weather_data.json` 解析 CWA 資料結構，提取各縣市各時間段的 MinT / MaxT。
+從 `weather_data.json` 解析 CWA 一週預報資料結構，提取各縣市每日的最高 / 最低溫。
 
-### CWA JSON 結構
+### CWA JSON 結構（F-D0047-091）
 ```
-records.location[]
-  ├─ locationName          # 縣市名
-  └─ weatherElement[]
-       ├─ elementName      # "MinT" / "MaxT" / "Wx" / "PoP" / "CI"
-       └─ time[]
-            ├─ startTime
-            ├─ endTime
-            └─ parameter.parameterName   # 溫度數值（字串）
+records.Locations[0].Location[]          # 22 縣市
+  ├─ LocationName          # 縣市名
+  └─ WeatherElement[]
+       ├─ ElementName      # "最高溫度" / "最低溫度" / "天氣現象" …
+       └─ Time[]           # 14 段（每段 12 小時，日 / 夜各一）
+            ├─ StartTime
+            ├─ EndTime
+            └─ ElementValue[0].MaxTemperature / MinTemperature
 ```
 
 ### 實作
 - `get_region()` 根據縣市名稱回傳所屬六大地區（供內部分類參考）
-- `extract_temperatures()` 逐縣市配對 MinT/MaxT，輸出結構化 list of dict
+- `extract_temperatures()` 逐縣市讀取「最高溫度 / 最低溫度」，依日期把 12 小時的日 / 夜時段彙整成「每日」最高 / 最低溫
 - 每筆包含 `countyName`、`regionName`、`dataDate`、`mint`、`maxt`
-- 結果存至 `temperatures.json`，共 22 縣市 × 3 時間段 = 66 筆
+- 結果存至 `temperatures.json`，共 22 縣市 × 7 天 = 154 筆
 
 ---
 
@@ -64,19 +64,19 @@ records.location[]
 CREATE TABLE TemperatureForecasts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     regionName TEXT    NOT NULL,   -- 縣市名稱
-    dataDate   TEXT    NOT NULL,   -- 時間段起始時間
+    dataDate   TEXT    NOT NULL,   -- 日期 (YYYY-MM-DD)
     mint       INTEGER NOT NULL,   -- 最低氣溫 (°C)
     maxt       INTEGER NOT NULL    -- 最高氣溫 (°C)
 )
 ```
 
 ### 實作
-- `insert_temperatures()` 直接存入各縣市原始資料，不做地區聚合
+- `insert_temperatures()` 直接存入各縣市每日資料，不做地區聚合
 - 每次執行先 `DELETE` 舊資料，確保結果乾淨
-- 寫入後執行三道驗證查詢：縣市列表、臺北市詳細資料、各縣市筆數
+- 寫入後執行三道驗證查詢：縣市列表、中部地區詳細資料、各縣市筆數
 
 ### 結果
-22 個縣市 × 3 個時間段 = 66 筆資料
+22 個縣市 × 7 天 = 154 筆資料
 
 ---
 
@@ -167,7 +167,7 @@ li[role="option"] { background: white !important; color: #1E3A8A !important; }
 
 #### v5 — 縣市層級化
 
-原本以六大地區聚合儲存（18 筆），改為直接儲存各縣市原始資料（66 筆）。
+原本以六大地區聚合儲存（18 筆），改為直接儲存各縣市原始資料（每縣市數筆）。
 
 - DB `insert_temperatures()` 移除聚合邏輯，改存 `countyName`
 - App dropdown 改為 22 縣市；地圖加入 `COUNTY_INFO`（22 縣市座標）
@@ -200,3 +200,18 @@ def _needs_init():
 
 **側欄與地圖同步**：
 從 dropdown 選取縣市時，`map_expanded_region` 自動更新為對應地區，地圖即時展開。
+
+---
+
+## 2026-06-09 — 改用一週預報資料集（修正：demo 缺少一週資料）
+
+### 問題
+原本使用 `F-C0032-001`（今明 36 小時預報），每縣市只有 3 個時間段，demo 無法呈現「一週」的氣溫資料而被扣分。
+
+### 修正
+- 資料集改為 `F-D0047-091`（臺灣各縣市未來一週天氣預報），一次回傳 22 縣市、每縣市 14 個 12 小時時段（涵蓋 7 天）。
+- 注意新版 API 採大寫鍵名與不同巢狀結構：`records.Locations[0].Location[]`、`WeatherElement[].ElementName`（中文「最高溫度 / 最低溫度」）、`Time[].ElementValue[0].MaxTemperature / MinTemperature`。
+- `extract_temperatures()` 將每日日 / 夜兩段彙整為「每日」最高 / 最低溫 → 每縣市 7 筆，全台共 154 筆。
+- `dataDate` 改為日期字串 `YYYY-MM-DD`；App 折線圖與表格改顯示 `MM/DD`。
+- HW2-3 驗證查詢改列「中部地區」（符合作業要求）。
+- App `_needs_init()` 新增「天數 < 5 → 自動重建」，確保雲端舊資料庫會升級為一週資料。
